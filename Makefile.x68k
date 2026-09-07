@@ -1,0 +1,97 @@
+CROSS ?= m68k-xelf-
+CC := $(CROSS)gcc
+PYTHON ?= python3
+CURL ?= curl
+UNAR ?= unar
+
+BUILD_DIR := build/x68k
+PACKAGE_DIR := $(BUILD_DIR)/package
+XDF_ROOT := $(PACKAGE_DIR)/xdfroot
+DIST_DIR := dist
+TARGET := $(DIST_DIR)/bledemo.x
+XDF := $(DIST_DIR)/ble-motion-demo.xdf
+ZIP := $(DIST_DIR)/ble-motion-demo.zip
+
+OBJECTS := $(BUILD_DIR)/main.o $(BUILD_DIR)/glut.o
+CPPFLAGS := -Isrc/x68k
+CFLAGS := -m68000 -O2 -g -Wall -Wextra -pedantic
+LDLIBS := -lm
+
+HUMAN_LZH := $(PACKAGE_DIR)/HUMN302I.LZH
+HUMAN_XDF := $(PACKAGE_DIR)/HUMAN302.XDF
+HUMAN_EXTRACT_DIR := $(PACKAGE_DIR)/human302
+HUMAN_EXTRACT_STAMP := $(HUMAN_EXTRACT_DIR)/.extracted
+LICENSE_TEXT := $(PACKAGE_DIR)/LICENSE.TXT
+XDFTOOL := $(PACKAGE_DIR)/xdftool.py
+
+HUMAN_URL := http://retropc.net/x68000/software/sharp/human302/HUMN302I.LZH
+XDFTOOL_URL := https://cdn.jsdelivr.net/gh/yunkya2/x68kmisc@08f647bad280dc8eac778f3f98358350d10e9471/xdftool/xdftool.py
+
+.PHONY: all clean-x68k distclean-x68k check-tools check-xdf
+
+all: check-tools $(TARGET) $(XDF) $(ZIP)
+
+check-tools:
+	@command -v $(CC) >/dev/null 2>&1 || { echo "Error: $(CC) was not found." >&2; exit 1; }
+	@command -v $(PYTHON) >/dev/null 2>&1 || { echo "Error: $(PYTHON) was not found." >&2; exit 1; }
+	@command -v $(CURL) >/dev/null 2>&1 || { echo "Error: $(CURL) was not found." >&2; exit 1; }
+	@command -v $(UNAR) >/dev/null 2>&1 || { echo "Error: $(UNAR) was not found. Install it with: sudo apt install unar" >&2; exit 1; }
+
+$(TARGET): $(OBJECTS) | $(DIST_DIR)
+	$(CC) $(CFLAGS) -o $@ $(OBJECTS) $(LDLIBS)
+
+$(BUILD_DIR)/main.o: src/main.c src/platform.h src/x68k/GL/gl.h src/x68k/GL/glut.h | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/glut.o: src/x68k/glut.c src/x68k/GL/gl.h src/x68k/GL/glut.h | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR) $(PACKAGE_DIR) $(DIST_DIR):
+	mkdir -p $@
+
+$(HUMAN_LZH): | $(PACKAGE_DIR)
+	$(CURL) -L --fail --show-error -o $@ $(HUMAN_URL)
+
+$(HUMAN_EXTRACT_STAMP): $(HUMAN_LZH)
+	rm -rf $(HUMAN_EXTRACT_DIR)
+	mkdir -p $(HUMAN_EXTRACT_DIR)
+	$(UNAR) -e shift_jis -D -f -o $(HUMAN_EXTRACT_DIR) $(HUMAN_LZH)
+	@find $(HUMAN_EXTRACT_DIR) -maxdepth 1 -type f -iname 'HUMAN302.XDF' -print -quit | grep -q . || { echo "Error: HUMAN302.XDF was not found." >&2; exit 1; }
+	@find $(HUMAN_EXTRACT_DIR) -maxdepth 1 -type f -iname '*.txt' -print -quit | grep -q . || { echo "Error: Human68k license text was not found." >&2; exit 1; }
+	touch $@
+
+$(HUMAN_XDF): $(HUMAN_EXTRACT_STAMP)
+	@src="$$(find $(HUMAN_EXTRACT_DIR) -maxdepth 1 -type f -iname 'HUMAN302.XDF' -print -quit)"; cp "$$src" $@
+
+$(LICENSE_TEXT): $(HUMAN_EXTRACT_STAMP)
+	@src="$$(find $(HUMAN_EXTRACT_DIR) -maxdepth 1 -type f -iname '*.txt' -print -quit)"; cp "$$src" $@
+
+$(XDFTOOL): | $(PACKAGE_DIR)
+	$(CURL) -L --fail --show-error -o $@ $(XDFTOOL_URL)
+	chmod +x $@
+
+$(XDF): Makefile.x68k $(TARGET) $(HUMAN_XDF) $(XDFTOOL) scripts/patch_autoexec.py
+	rm -rf $(XDF_ROOT)
+	mkdir -p $(XDF_ROOT)
+	cd $(XDF_ROOT) && $(PYTHON) ../xdftool.py x ../HUMAN302.XDF
+	cp $(TARGET) $(XDF_ROOT)/bledemo.x
+	@autoexec="$$(find $(XDF_ROOT) -maxdepth 1 -type f -iname 'autoexec.bat' -print -quit)"; \
+	test -n "$$autoexec" || { echo "Error: AUTOEXEC.BAT was not found." >&2; exit 1; }; \
+	$(PYTHON) scripts/patch_autoexec.py "$$autoexec" "bledemo.x"
+	cd $(XDF_ROOT) && $(PYTHON) ../xdftool.py c ../../../../$(XDF) *
+	@echo "Created bootable XDF: $(XDF)"
+
+$(ZIP): $(XDF) $(LICENSE_TEXT) scripts/make_sjis_zip.py
+	rm -f $(ZIP)
+	$(PYTHON) scripts/make_sjis_zip.py $(ZIP) $(XDF) $(LICENSE_TEXT)
+	@echo "Created distribution archive: $(ZIP)"
+
+check-xdf: $(XDF) $(XDFTOOL)
+	$(PYTHON) $(XDFTOOL) t $(XDF)
+
+clean-x68k:
+	-rm -f $(OBJECTS) $(TARGET) $(XDF) $(ZIP)
+	-rm -rf $(XDF_ROOT)
+
+distclean-x68k: clean-x68k
+	-rm -rf $(BUILD_DIR)

@@ -1,0 +1,37 @@
+cmake_minimum_required(VERSION 3.21)
+project(ble-motion-demo VERSION 0.1.0 LANGUAGES C)
+
+find_package(OpenGL REQUIRED)
+if(APPLE)
+    find_package(GLUT REQUIRED)
+    set(DEMO_GLUT GLUT::GLUT)
+else()
+    include(FetchContent)
+    set(FREEGLUT_BUILD_DEMOS OFF CACHE BOOL "" FORCE)
+    set(FREEGLUT_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(FREEGLUT_BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
+    FetchContent_Declare(freeglut
+        GIT_REPOSITORY https://github.com/freeglut/freeglut.git
+        GIT_TAG v3.4.0
+        GIT_SHALLOW TRUE)
+    FetchContent_MakeAvailable(freeglut)
+    set(DEMO_GLUT freeglut_static)
+endif()
+
+add_executable(ble-motion-demo src/main.c src/platform.h)
+set_target_properties(ble-motion-demo PROPERTIES
+    C_STANDARD 90 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+target_link_libraries(ble-motion-demo PRIVATE ${DEMO_GLUT} OpenGL::GL)
+if(NOT WIN32)
+    target_link_libraries(ble-motion-demo PRIVATE m)
+endif()
+if(NOT APPLE)
+    target_include_directories(ble-motion-demo BEFORE PRIVATE "${freeglut_SOURCE_DIR}/include")
+    target_compile_definitions(ble-motion-demo PRIVATE FREEGLUT_STATIC)
+endif()
+if(MSVC)
+    target_compile_options(ble-motion-demo PRIVATE /W4)
+else()
+    target_compile_options(ble-motion-demo PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+install(TARGETS ble-motion-demo RUNTIME DESTINATION bin)

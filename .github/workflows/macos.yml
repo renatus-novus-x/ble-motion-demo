@@ -1,0 +1,31 @@
+name: macos
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Install
+        run: cmake --install build --config Release --prefix out
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: ble-motion-demo-macos
+          path: out/bin/
+          if-no-files-found: error
